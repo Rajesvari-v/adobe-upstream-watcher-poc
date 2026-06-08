@@ -1,3 +1,6 @@
+permissions:
+  issues: write
+  contents: write
 name: Watch Adobe Upstream Repo
 
 on:
@@ -34,11 +37,7 @@ jobs:
       - name: Get stored SHA
         id: stored
         run: |
-          STORED=$(curl -s \
-            -H "Authorization: Bearer ${{ secrets.PAT_TOKEN }}" \
-            -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/${{ github.repository }}/actions/variables/ADOBE_UPSTREAM_SHA \
-            | jq -r '.value // ""')
+          STORED=$(cat .github/upstream-sha.txt 2>/dev/null || echo "")
           echo "sha=$STORED" >> $GITHUB_OUTPUT
 
       - name: Compare SHAs
@@ -80,14 +79,13 @@ jobs:
 
       - name: Update stored SHA
         if: steps.compare.outputs.changed == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          curl -s -X PATCH \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/${{ github.repository }}/actions/variables/ADOBE_UPSTREAM_SHA \
-            -d "{\"name\":\"ADOBE_UPSTREAM_SHA\",\"value\":\"${{ steps.upstream.outputs.sha }}\"}"
+          echo "${{ steps.upstream.outputs.sha }}" > .github/upstream-sha.txt
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add .github/upstream-sha.txt
+          git commit -m "chore: update upstream Adobe SHA"
+          git push
 
       - name: No change detected
         if: steps.compare.outputs.changed == 'false'
