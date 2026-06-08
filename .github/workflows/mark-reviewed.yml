@@ -1,0 +1,85 @@
+name: Mark Upstream Reviewed
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: Branch reviewed
+        required: true
+        type: choice
+        options:
+          - main
+          - sc-expert-session
+
+permissions:
+  issues: write
+  contents: write
+
+jobs:
+  mark-reviewed:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Fetch latest Adobe SHA for selected branch
+        id: upstream
+        run: |
+          RESPONSE=$(curl -s \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/adobe/guides-extension/commits/${{ github.event.inputs.branch }})
+          SHA=$(echo $RESPONSE | jq -r '.sha')
+          echo "sha=$SHA" >> $GITHUB_OUTPUT
+
+      - name: Update upstream-state.json for selected branch
+        run: |
+          jq --arg branch "${{ github.event.inputs.branch }}" \
+             --arg sha "${{ steps.upstream.outputs.sha }}" \
+             '.[$branch].sha = $sha' \
+             .github/upstream-state.json > tmp.json
+          mv tmp.json .github/upstream-state.json
+          echo "Updated ${{ github.event.inputs.branch }} SHA to ${{ steps.upstream.outputs.sha }}"
+
+      - name: Commit and push updated JSON
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add .github/upstream-state.json
+          git commit -m "chore: mark ${{ github.event.inputs.branch }} upstream reviewed"
+          git push
+
+      - name: Find open Issue for selected branch
+        id: find_issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          LABEL="upstream-sync-${{ github.event.inputs.branch }}"
+          ISSUE_NUMBER=$(gh issue list \
+            --repo ${{ github.repository }} \
+            --label "$LABEL" \
+            --state open \
+            --json number \
+            --jq '.[0].number')
+          echo "number=$ISSUE_NUMBER" >> $GITHUB_OUTPUT
+
+      - name: Comment and close Issue
+        if: steps.find_issue.outputs.number != '' && steps.find_issue.outputs.number != 'null'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue comment ${{ steps.find_issue.outputs.number }} \
+            --repo ${{ github.repository }} \
+            --body "Review completed.
+
+          Stored SHA updated to:
+          \`${{ steps.upstream.outputs.sha }}\`
+
+          Issue automatically closed by mark-reviewed workflow."
+
+          gh issue close ${{ steps.find_issue.outputs.number }} \
+            --repo ${{ github.repository }}
+
+      - name: No open Issue found
+        if: steps.find_issue.outputs.number == '' || steps.find_issue.outputs.number == 'null'
+        run: echo "ℹ️ No open Issue found for ${{ github.event.inputs.branch }} — JSON updated only"
