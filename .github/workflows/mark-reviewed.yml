@@ -28,8 +28,14 @@ jobs:
         run: |
           RESPONSE=$(curl -s \
             -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
             https://api.github.com/repos/adobe/guides-extension/commits/${{ github.event.inputs.branch }})
           SHA=$(echo $RESPONSE | jq -r '.sha')
+          if [ -z "$SHA" ] || [ "$SHA" == "null" ]; then
+            echo "Failed to fetch Adobe SHA — API may be unavailable"
+            exit 1
+          fi
+          echo "✅ Successfully fetched SHA: $SHA"
           echo "sha=$SHA" >> $GITHUB_OUTPUT
 
       - name: Update upstream-state.json for selected branch
